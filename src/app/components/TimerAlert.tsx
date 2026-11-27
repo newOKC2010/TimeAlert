@@ -3,12 +3,8 @@
 import { useState, useEffect, useRef } from 'react'
 
 const TIME_OPTIONS = [
-  { label: '5 วิ',    seconds: 5 },
-  { label: '10 วิ',   seconds: 10 },
   { label: '5 นาที',  seconds: 5 * 60 },
   { label: '10 นาที', seconds: 10 * 60 },
-  { label: '20 นาที', seconds: 20 * 60 },
-  { label: '30 นาที', seconds: 30 * 60 },
 ]
 
 function playAlert() {
@@ -52,6 +48,7 @@ export default function TimerAlert() {
   const [remaining, setRemaining] = useState(TIME_OPTIONS[0].seconds)
   const [status, setStatus] = useState<Status>('idle')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const endRef = useRef(0)  // เวลาสิ้นสุดจริง (timestamp ms)
 
   const clearTimer = () => {
     if (intervalRef.current) {
@@ -61,35 +58,47 @@ export default function TimerAlert() {
   }
 
   // รีเซ็ตเมื่อเปลี่ยนเวลา
-  useEffect(() => {
+  const handleSelect = (seconds: number) => {
     clearTimer()
+    setSelected(seconds)
     setStatus('idle')
-    setRemaining(selected)
-  }, [selected])
+    setRemaining(seconds)
+  }
 
-  // เริ่ม/หยุด interval ตาม status
+  // เริ่ม/หยุด interval ตาม status (คำนวณจากเวลาจริง ไม่สะสม delay)
   useEffect(() => {
-    if (status !== 'running') {
-      clearTimer()
-      return
-    }
-    intervalRef.current = setInterval(() => {
-      setRemaining(prev => Math.max(0, prev - 1))
-    }, 1000)
-    return clearTimer
-  }, [status])
-
-  // ตรวจสอบเมื่อครบกำหนด
-  useEffect(() => {
-    if (remaining === 0 && status === 'running') {
+    if (status !== 'running') return
+    const tick = () => {
+      if (!intervalRef.current) return
+      const left = Math.max(0, Math.ceil((endRef.current - Date.now()) / 1000))
+      setRemaining(left)
+      if (left > 0) return
+      // ครบกำหนด
       clearTimer()
       setStatus('done')
       playAlert()
     }
+    intervalRef.current = setInterval(tick, 250)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearTimer()
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [status])
+
+  // อัปเดตเวลาบน browser tab
+  useEffect(() => {
+    const m = String(Math.floor(remaining / 60)).padStart(2, '0')
+    const s = String(remaining % 60).padStart(2, '0')
+    document.title = status === 'done'
+      ? '⏰ ครบกำหนดแล้ว!'
+      : `${m}:${s} - แจ้งเตือนตามเวลา`
   }, [remaining, status])
 
   const handleStart = () => {
-    if (status === 'idle' || status === 'paused') setStatus('running')
+    if (status !== 'idle' && status !== 'paused') return
+    endRef.current = Date.now() + remaining * 1000
+    setStatus('running')
   }
   const handleStop = () => {
     if (status === 'running') setStatus('paused')
@@ -125,7 +134,7 @@ export default function TimerAlert() {
           {TIME_OPTIONS.map(opt => (
             <button
               key={opt.seconds}
-              onClick={() => setSelected(opt.seconds)}
+              onClick={() => handleSelect(opt.seconds)}
               disabled={status === 'running'}
               className={`px-4 py-2 rounded-xl font-semibold text-sm transition-colors
                 ${selected === opt.seconds
